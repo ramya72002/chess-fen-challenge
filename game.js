@@ -1,6 +1,4 @@
-// Check if the code is running in Node.js
 if (typeof window === "undefined") {
-  // Use dynamic import in Node.js
   import("./board.js")
     .then((pkg) => {
       Board = pkg.Board;
@@ -9,8 +7,9 @@ if (typeof window === "undefined") {
       console.error("Failed to load the board module:", err);
     });
 }
+
 class Game {
-  constructor(w, h, padding, paddingTop, paddingBottom, fen) {
+  constructor(w, h, padding, paddingTop, paddingBottom) {
     this.h = h;
     this.w = w;
     this.x = padding;
@@ -18,194 +17,92 @@ class Game {
     this.padding = padding;
     this.paddingTop = paddingTop;
     this.paddingBottom = paddingBottom;
-    this.board = new Board(this.x, this.y, this.w, this.h, fen);
 
-    this.color = this.board.data.legalMoves.color;
-    const v = verbose;
-    verbose = 0;
+    // Array of puzzles with FEN, correct move, and turn
+    this.puzzles = [
+      {
+        fen: "rnbqkb1r/pppppppp/5n2/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq - 0 1",
+        correctMove: { from: 45, to: 39 }, // Knight move
+        whiteToMove: true
+      },
+      {
+        fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+        correctMove: { from: 54, to: 46 }, // Pawn move
+        whiteToMove: true
+      },
+      // {
+      //   fen: "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq d3 0 1",
+      //   correctMove: { from: "g8", to: "f6" }, // Knight move
+      //   whiteToMove: false
+      // }
+    ];
+
+    this.currentPuzzleIndex = 0;
+    this.loadPuzzle();
+  }
+
+  loadPuzzle() {
+    const puzzle = this.puzzles[this.currentPuzzleIndex];
+    this.board = new Board(this.x, this.y, this.w, this.h, puzzle.fen);
+    this.color = puzzle.whiteToMove ? Piece.WHITE : Piece.BLACK;
     this.board.data.setLegalMovesFor(this.color);
-    verbose = v;
-    // needs a two pass because of castling rules and no opponent data is there
-    this.board.data.setLegalMovesFor(this.color);
-
-    this.computerBlack = evaluators
-      .newPlayerOff(computerName, this.board.data, Piece.BLACK)
-      .on();
-    this.computerWhite = evaluators.newPlayerOff(
-      computerName,
-      this.board.data,
-      Piece.WHITE
-    );
-
-    this.velocity = 0.02;
-    this.time = 0.0;
   }
 
   draw() {
     this.board.draw();
-    let turnText =
-      this.color === Piece.WHITE
-        ? "WHITE's turn" +
-          (this.computerWhite.isOn()
-            ? "(AI)" // (" + this.computerWhite.name + ")"
-            : "")
-        : "BLACK's turn" +
-          (this.computerBlack.isOn()
-            ? " (AI)" // (" + this.computerBlack.name + ")"
-            : "");
+    let turnText = this.color === Piece.WHITE ? "WHITE's turn" : "BLACK's turn";
+
     if (this.board.check) {
       turnText += " CHECK";
     }
-    if (this.board.data.isFinished()) {
-      turnText = this.board.data.result;
-      fill("red");
-      rect(this.x, this.y - this.paddingTop, this.w, this.paddingTop);
-    }
+
     const fontSize = this.w > 600 ? 40 : this.w > 400 ? 30 : 20;
     textSize(fontSize);
     fill("white");
     textAlign(CENTER);
-    text(
-      turnText,
-      this.x + this.w / 2,
-      this.y - this.paddingTop + this.paddingTop / 2 + (fontSize - 10) / 2
-    );
-    if (!this.board.data.isFinished()) {
-      if (this.time > 1.0) {
-        const movedBlack = this.computerMoveNow(this.computerBlack, 0);
-        const movedWhite = this.computerMoveNow(this.computerWhite, 0);
-        if (
-          !movedWhite &&
-          !movedBlack &&
-          this.computerBlack.isOn() &&
-          this.computerWhite.isOn()
-        ) {
-          this.computerWhite.isTurn(this.color);
-        }
-        this.time = 0;
-      }
-      this.time += this.velocity;
-    }
-  }
-
-  undoLastMove() {
-    let lastMove = this.board.undoLastMove();
-    if (lastMove && this.nextComputer().isOn()) {
-      lastMove = this.board.undoLastMove();
-      if (lastMove) {
-        // change already to change back to the same again if opponent is auto
-        this.changeTurn();
-      }
-    }
-    if (lastMove) {
-      this.makeTurnAndCalculate(0);
-    }
-  }
-
-  makeTurnAndCalculate(depth) {
-    this.changeTurn();
-    this.board.data.setLegalMovesFor(this.color);
-    const fen = this.board.data.calculatedFen();
-    const fenHTML = window.document.getElementById("fen");
-    if (fenHTML) {
-      fenHTML.value = fen;
-      window.location.hash = fen;
-    }
-    this.computerMove(undefined, depth + 1);
-  }
-
-  makeMove(move, depth) {
-    this.board.makeMove(move, true);
-    this.makeTurnAndCalculate(depth);
-  }
-
-  setTimeLastMove(startTime) {
-    const endTime = performance.now();
-    const timeLastMove = window.document.getElementById("timeLastMove");
-    if (timeLastMove) {
-      timeLastMove.innerHTML = `${
-        Math.floor((endTime - startTime) * 10) / 10
-      } ms`;
-    }
+    text(turnText, this.x + this.w / 2, this.y - this.paddingTop + this.paddingTop / 2 + (fontSize - 10) / 2);
   }
 
   clicked(clientY, clientX) {
-    const startTime = performance.now();
     const selectedIndex = this.board.data.selectedIndex;
+
     if (selectedIndex >= 0) {
       const clickedCell = this.board.clickedCell(clientY, clientX);
-      const validMove = this.board.getPossibleMoveForTargetIndex(
-        clickedCell.index,
-        selectedIndex
-      );
-      if (clickedCell && clickedCell.index != selectedIndex && validMove) {
-        this.makeMove(validMove, 0);
+      const validMove = this.board.getPossibleMoveForTargetIndex(clickedCell.index, selectedIndex);
+
+      if (clickedCell && clickedCell.index !== selectedIndex && validMove) {
+        // Check if the move is correct
+        if (this.isCorrectMove(validMove)) {
+          alert("You're Right! ✅");
+          this.nextPuzzle();
+        } else {
+          alert("Wrong Move! ❌ Try Again.");
+        }
       } else {
         this.board.selectCellIndex(NOT_SELECTED);
         this.board.data.setLegalMovesFor(this.color);
       }
     } else {
-      const clickedCellForTurn = this.board.clickedCellByColor(
-        clientY,
-        clientX,
-        this.color
-      );
-      if (clickedCellForTurn) {
-        const validMove = this.board.hasPossibleMoveForIndex(
-          clickedCellForTurn.index
-        );
-        if (clickedCellForTurn && validMove) {
-          this.board.clickedToString(clientY, clientX);
-          this.board.selectCellIndex(clickedCellForTurn.index);
-          this.board.data.setLegalMovesFor(this.color);
-        }
+      const clickedCellForTurn = this.board.clickedCellByColor(clientY, clientX, this.color);
+      if (clickedCellForTurn && this.board.hasPossibleMoveForIndex(clickedCellForTurn.index)) {
+        this.board.selectCellIndex(clickedCellForTurn.index);
+        this.board.data.setLegalMovesFor(this.color);
       }
     }
-    this.setTimeLastMove(startTime);
-    return false;
   }
 
-  changeTurn() {
-    this.color = this.color === Piece.WHITE ? Piece.BLACK : Piece.WHITE;
+  isCorrectMove(move) {
+    console.log(move)
+    const puzzle = this.puzzles[this.currentPuzzleIndex];
+    return puzzle.correctMove.from === move.from && puzzle.correctMove.to === move.to;
   }
 
-  currentComputer() {
-    return this.color === Piece.WHITE ? this.computerWhite : this.computerBlack;
-  }
-  nextComputer() {
-    return this.color === Piece.WHITE ? this.computerBlack : this.computerWhite;
-  }
-
-  computerMoveBlack() {
-    if (this.computerBlack.isOn() && this.computerBlack.isTurn(this.color)) {
-      // skip
+  nextPuzzle() {
+    this.currentPuzzleIndex++;
+    if (this.currentPuzzleIndex < this.puzzles.length) {
+      this.loadPuzzle();
+    } else {
+      alert("🎉 You've completed all puzzles!");
     }
-  }
-  computerMoveWhite() {
-    if (this.computerWhite.isOn() && this.computerWhite.isTurn(this.color)) {
-      //skip
-    }
-  }
-
-  computerMoveNow(computer, depth) {
-    if (computer.isOn() && computer.shallRunNext()) {
-      const computerMove = computer.chooseMove();
-      if (computerMove) {
-        this.makeMove(computerMove, depth);
-        return true;
-      }
-    }
-    return false;
-  }
-
-  computerMove(computer, depth) {
-    if (!computer) {
-      // must call isTurn - to calculate next run in draw
-      const isWhiteTurn = this.computerWhite.isTurn(this.color);
-      this.computerBlack.isTurn(this.color);
-      computer = isWhiteTurn ? this.computerWhite : this.computerBlack;
-    }
-    if (depth > 1) return false;
-    return this.computerMoveNow(computer, depth);
   }
 }
